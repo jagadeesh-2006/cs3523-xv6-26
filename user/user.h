@@ -24,6 +24,10 @@ int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);
 int uptime(void);
+int getppid(void);      //getppid
+int getnumchild(void);    //no of active childs(not zombies)
+int getsyscount(void);    // returns syscall count for calling process
+int childsyscount(int);   //returns syscall count for child of the caller having the pid
 
 // ulib.c
 int stat(const char*, struct stat*);
