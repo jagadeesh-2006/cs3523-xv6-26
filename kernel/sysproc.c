@@ -55,6 +55,32 @@ sys_childsyscount(void)
   argint(0, &pid);
   return kchildsyscount(pid);
 }
+
+// return current MLFQ level of calling process
+uint64
+sys_getlevel(void)
+{
+  struct proc *p = myproc();
+  if (!p)
+    return -1;
+  return p->qlevel;
+}
+
+// fill user-provided mlfqinfo struct with stats for process pid
+uint64
+sys_getmlfqinfo(void)
+{
+  int pid;
+  uint64 addr;
+  argint(0, &pid);
+  argaddr(1, &addr);
+  struct mlfqinfo info;
+  if (kgetmlfqinfo(pid, &info) < 0)
+    return -1;
+  if (copyout(myproc()->pagetable, addr, (char *)&info, sizeof(info)) < 0)
+    return -1;
+  return 0;
+}
 uint64
 sys_fork(void)
 {

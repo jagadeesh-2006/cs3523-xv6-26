@@ -128,6 +128,14 @@ found:
   p->state = USED;
   p->syscallcount = 0; // initialize syscall counter
 
+  // initialize MLFQ fields
+  p->qlevel = 0;
+  p->ticks_in_level = 0;
+  for (int i = 0; i < 4; i++)
+    p->total_ticks[i] = 0;
+  p->times_scheduled = 0;
+  p->last_syscalls = 0;
+
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
   {
@@ -175,6 +183,14 @@ freeproc(struct proc *p)
   p->xstate = 0;
   p->state = UNUSED;
   p->syscallcount = 0;
+  p->qlevel = 0;
+  p->ticks_in_level = 0;
+  for (int i = 0; i < 4; i++)
+    p->total_ticks[i] = 0;
+  p->times_scheduled = 0;
+  p->last_syscalls = 0;
+  p->times_scheduled = 0;
+  p->last_syscalls = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -351,6 +367,28 @@ int kchildsyscount(int pid)
   return count;
 }
 
+// kernel helper for getmlfqinfo syscall
+int kgetmlfqinfo(int pid, struct mlfqinfo *info)
+{
+  int found = -1;
+  for (struct proc *p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->pid == pid)
+    {
+      info->level = p->qlevel;
+      for (int i = 0; i < 4; i++)
+        info->ticks[i] = p->total_ticks[i];
+      info->times_scheduled = p->times_scheduled;
+      info->total_syscalls = p->syscallcount;
+      found = 0;
+      release(&p->lock);
+      break;
+    }
+    release(&p->lock);
+  }
+  return found;
+}
 int kgetnumchild(void)
 {
   int count = 0;
@@ -509,27 +547,97 @@ void scheduler(void)
     // to avoid a possible race between an interrupt
     // and wfi.
     intr_on();
-    intr_off();
+    // intr_off();
 
     int found = 0;
-    for (p = proc; p < &proc[NPROC]; p++)
-    {
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
-      {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+    //   for (p = proc; p < &proc[NPROC]; p++)
+    //   {
+    //     acquire(&p->lock);
+    //     if (p->state == RUNNABLE)
+    //     {
+    //       // Switch to chosen process.  It is the process's job
+    //       // to release its lock and then reacquire it
+    //       // before jumping back to us.
+    //       p->state = RUNNING;
+    //       c->proc = p;
+    //       swtch(&c->context, &p->context);
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+    //       // Process is done running for now.
+    //       // It should have changed its p->state before coming back.
+    //       c->proc = 0;
+    //       found = 1;
+    //     }
+    static int last_index[4] = {0, 0, 0, 0}; // round-robin starting points
+    int level;
+    struct proc *chosen = 0;
+    int chosen_idx = -1;
+    for (level = 0; level < 4; level++)
+    {
+      // search for a runnable process at this level starting from last_index[level]
+      int start = last_index[level];
+      int idx = 0;
+      for (p = proc; p < &proc[NPROC]; p++, idx++)
+      {
+        if (idx < start)
+          continue;
+        acquire(&p->lock);
+        if (p->state == RUNNABLE && p->qlevel == level)
+        {
+          chosen = p;
+          chosen_idx = idx;
+          break;
+        }
+        release(&p->lock);
       }
+      if (chosen)
+        break;
+      // if none found after start, wrap around
+      for (p = proc, idx = 0; chosen == 0 && idx < start; p++, idx++)
+      {
+        acquire(&p->lock);
+        if (p->state == RUNNABLE && p->qlevel == level)
+        {
+          chosen = p;
+          chosen_idx = idx;
+          break;
+        }
+        release(&p->lock);
+      }
+      if (chosen)
+        break;
+    }
+
+    if (chosen)
+    {
+      // record rr starting position for this level
+      last_index[level] = (chosen_idx + 1) % NPROC;
+      p = chosen;
+      // now run process
+      p->state = RUNNING;
+      p->times_scheduled++;
+      
+      if (p->ticks_in_level == 0)
+      p->last_syscalls = p->syscallcount;
+      c->proc = p;
+      swtch(&c->context, &p->context);
+      // printf("PID %d level %d ticks %d\n", p->pid, p->qlevel, p->ticks_in_level);
+      c->proc = 0;
+      // check if quantum expired BEFORE running again
+      int quanta[4] = {2,4,8,16};
+
+      if (p->ticks_in_level >= quanta[p->qlevel]) {
+        int deltaS = p->syscallcount - p->last_syscalls;
+
+        if (deltaS < p->ticks_in_level && p->qlevel < 3) {
+          p->qlevel++;
+        }
+
+        p->ticks_in_level = 0;
+        p->last_syscalls = p->syscallcount;
+      }
+      
       release(&p->lock);
+      found = 1;
     }
     if (found == 0)
     {

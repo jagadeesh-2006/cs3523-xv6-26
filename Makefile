@@ -146,6 +146,14 @@ UPROGS=\
 	$U/_forphan\
 	$U/_dorphan\
 	$U/_getsyscount\
+	$U/_testmlfq\
+	$U/_mlfqtest\
+	$U/_cpubound\
+	$U/_mixed\
+	$U/_test1\
+	$U/_test2\
+	$U/_test3\
+
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

@@ -93,6 +93,13 @@ struct proc {
   int pid;                     // Process ID
   int syscallcount;           // number of syscalls invoked since creation
 
+  // scheduling (MLFQ) fields
+  int qlevel;                  // current MLFQ queue level (0-3)
+  int ticks_in_level;          // ticks used in current quantum
+  int total_ticks[4];         // aggregated ticks per level
+  int times_scheduled;         // number of times scheduled
+  int last_syscalls;           // syscall count snapshot at start of slice
+
   // wait_lock must be held when using this:
   struct proc *parent;         // Parent process
 
@@ -105,4 +112,12 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+};
+
+// structure returned by getmlfqinfo syscall
+struct mlfqinfo {
+  int level;                // current queue level
+  int ticks[4];             // total ticks consumed at each level
+  int times_scheduled;      // number of times the process has been scheduled
+  int total_syscalls;       // total syscalls made by the process
 };

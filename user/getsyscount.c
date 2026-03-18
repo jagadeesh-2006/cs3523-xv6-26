@@ -9,7 +9,7 @@ int main(void) {
     //normal case
     count = getsyscount();
     printf("First call: %d\n", count);
-    printf("Making second call.\n");
+    // printf("Making second call.\n");
     int count2 = getsyscount();
     printf("Second call: %d\n", count2);
     

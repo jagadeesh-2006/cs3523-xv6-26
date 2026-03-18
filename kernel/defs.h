@@ -4,6 +4,7 @@ struct file;
 struct inode;
 struct pipe;
 struct proc;
+struct mlfqinfo; // for getmlfqinfo syscall
 struct spinlock;
 struct sleeplock;
 struct stat;
@@ -84,6 +85,7 @@ int kfork(void);
 int kgetppid(struct proc *);
 int kgetnumchild(void);
 int kchildsyscount(int);
+int kgetmlfqinfo(int, struct mlfqinfo *);
 
 int growproc(int);
 void proc_mapstacks(pagetable_t);
