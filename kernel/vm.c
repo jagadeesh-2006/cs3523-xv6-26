@@ -169,6 +169,7 @@ walkaddr(pagetable_t pagetable, uint64 va)
   if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
+  set_refbit(pa);
   return pa;
 }
 
@@ -350,6 +351,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       kfree(mem);
       goto err;
     }
+    add_frame(myproc(), i, (uint64)mem);  // track the new frame with refbit=1
   }
   return 0;
 
@@ -484,28 +486,6 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 // that was lazily allocated in sys_sbrk().
 // returns 0 if va is invalid or already mapped, or if
 // out of physical memory, and physical address if successful.
-// uint64
-// vmfault(pagetable_t pagetable, uint64 va, int read)
-// {
-//   uint64 mem;
-//   struct proc *p = myproc();
-
-//   if (va >= p->sz)
-//     return 0;
-//   va = PGROUNDDOWN(va);
-//   if(ismapped(pagetable, va)) {
-//     return 0;
-//   }
-//   mem = (uint64) kalloc();
-//   if(mem == 0)
-//     return 0;
-//   memset((void *) mem, 0, PGSIZE);
-//   if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
-//     kfree((void *)mem);
-//     return 0;
-//   }
-//   return mem;
-// }
 uint64
 vmfault(pagetable_t pagetable, uint64 va, int read)
 {
@@ -727,4 +707,15 @@ int swap_out(struct proc *p, uint64 va, void *pa)
   p->swap_index[vpn] = idx;
 
   return 0;
+}
+// Set refbit = 1 for a frame given physical address
+void set_refbit(uint64 pa) {
+    acquire(&frame_lock);
+    for(int i = 0; i < MAX_FRAMES; i++){
+        if(frame_table[i].used && frame_table[i].pa == pa){
+            frame_table[i].refbit = 1;
+            break;
+        }
+    }
+    release(&frame_lock);
 }
