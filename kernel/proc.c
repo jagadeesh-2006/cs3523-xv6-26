@@ -136,6 +136,12 @@ found:
   p->times_scheduled = 0;
   p->last_syscalls = 0;
 
+  p->vmstats.page_faults = 0;
+  p->vmstats.pages_evicted = 0;
+  p->vmstats.pages_swapped_in = 0;
+  p->vmstats.pages_swapped_out = 0;
+  p->vmstats.resident_pages = 0;
+
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
   {
@@ -875,4 +881,23 @@ void procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+int
+sys_getvmstats(int pid, struct vmstats *info)
+{
+    struct proc *p;
+
+    // Find the process with the given PID
+    for (p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+        if (p->pid == pid) {
+            // Copy stats to user-provided struct safely
+            int err = copyout(p->pagetable, (uint64)info, (char *)&p->vmstats, sizeof(struct vmstats));
+            release(&p->lock);
+            return err; // 0 on success, -1 on failure
+        }
+        release(&p->lock);
+    }
+
+    return -1; // PID not found
 }

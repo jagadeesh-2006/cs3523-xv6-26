@@ -26,3 +26,4 @@
 #define SYS_childsyscount 25
 #define SYS_getlevel 26
 #define SYS_getmlfqinfo 27
+#define SYS_getvmstats  28 

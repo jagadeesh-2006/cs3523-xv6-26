@@ -81,6 +81,13 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+struct vmstats {
+  int page_faults;
+  int pages_evicted;
+  int pages_swapped_in;
+  int pages_swapped_out;
+  int resident_pages;
+};
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -112,6 +119,15 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  // Virtual memory statistics
+  struct vmstats vmstats;
+  // swap metadata (PA3)
+  int swapped[MAX_PSYC_PAGES];     // 1 if page is swapped out
+  int swap_index[MAX_PSYC_PAGES];  // index in swap space
+
+  // virtual page tracking
+  uint64 pagelist[MAX_PSYC_PAGES]; // virtual addresses of pages
+  int num_pages;
 };
 
 // structure returned by getmlfqinfo syscall

@@ -41,6 +41,16 @@ struct mlfqinfo
 int getlevel(void);                      // returns current MLFQ level
 int getmlfqinfo(int, struct mlfqinfo *); // fills mlfqinfo for given pid
 
+struct vmstats {
+  int page_faults;
+  int pages_evicted;
+  int pages_swapped_in;
+  int pages_swapped_out;
+  int resident_pages;
+};
+
+int getvmstats(int pid, struct vmstats *info);
+
 // ulib.c
 int stat(const char *, struct stat *);
 char *strcpy(char *, const char *);

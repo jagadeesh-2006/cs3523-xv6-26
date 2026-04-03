@@ -8,6 +8,28 @@
 #include "proc.h"
 #include "fs.h"
 
+uint64 swap_in(struct proc *p, uint64 va);
+int swap_out(struct proc *p, uint64 va, void *pa);
+int evict_page(void);
+void add_frame(struct proc *p, uint64 va, uint64 pa);
+int ismapped(pagetable_t pagetable, uint64 va);
+
+struct frame {
+  int used;
+  struct proc *p;
+  uint64 pa;
+  uint64 va;
+  int refbit;
+};
+
+struct frame frame_table[MAX_FRAMES];
+int clock_hand = 0;
+struct spinlock frame_lock;
+
+// swap space
+char swap_space[MAX_SWAP][PGSIZE];
+int swap_used[MAX_SWAP];
+struct spinlock swap_lock;
 /*
  * the kernel's page table.
  */
@@ -66,6 +88,19 @@ void
 kvminit(void)
 {
   kernel_pagetable = kvmmake();
+
+  initlock(&frame_lock, "frame");
+  initlock(&swap_lock, "swap");
+
+  for(int i = 0; i < MAX_FRAMES; i++)
+    {frame_table[i].used = 0;  
+    frame_table[i].p = 0;    // make sure this is also set
+    frame_table[i].pa = 0;
+    frame_table[i].va = 0;
+    frame_table[i].refbit = 0;}
+
+  for(int i = 0; i < MAX_SWAP; i++)
+    swap_used[i] = 0;
 }
 
 // Switch the current CPU's h/w page table register to
@@ -449,27 +484,68 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 // that was lazily allocated in sys_sbrk().
 // returns 0 if va is invalid or already mapped, or if
 // out of physical memory, and physical address if successful.
+// uint64
+// vmfault(pagetable_t pagetable, uint64 va, int read)
+// {
+//   uint64 mem;
+//   struct proc *p = myproc();
+
+//   if (va >= p->sz)
+//     return 0;
+//   va = PGROUNDDOWN(va);
+//   if(ismapped(pagetable, va)) {
+//     return 0;
+//   }
+//   mem = (uint64) kalloc();
+//   if(mem == 0)
+//     return 0;
+//   memset((void *) mem, 0, PGSIZE);
+//   if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
+//     kfree((void *)mem);
+//     return 0;
+//   }
+//   return mem;
+// }
 uint64
 vmfault(pagetable_t pagetable, uint64 va, int read)
 {
-  uint64 mem;
   struct proc *p = myproc();
 
   if (va >= p->sz)
     return 0;
+
   va = PGROUNDDOWN(va);
-  if(ismapped(pagetable, va)) {
-    return 0;
+
+  if(ismapped(pagetable, va))
+    return walkaddr(pagetable, va);
+
+  p->vmstats.page_faults++;
+
+  int vpn = va / PGSIZE;
+
+  // CASE 1: swapped page
+  if(p->swapped[vpn]){
+    return swap_in(p, va);
   }
-  mem = (uint64) kalloc();
+
+  // CASE 2: new page
+  char *mem = kalloc();
   if(mem == 0)
     return 0;
-  memset((void *) mem, 0, PGSIZE);
-  if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
-    kfree((void *)mem);
+
+  memset(mem, 0, PGSIZE);
+
+  if (mappages(p->pagetable, va, PGSIZE,
+        (uint64)mem, PTE_W|PTE_U|PTE_R) != 0) {
+    kfree(mem);
     return 0;
   }
-  return mem;
+
+  add_frame(p, va, (uint64)mem);
+
+  p->vmstats.resident_pages++;
+
+  return (uint64)mem;
 }
 
 int
@@ -482,5 +558,173 @@ ismapped(pagetable_t pagetable, uint64 va)
   if (*pte & PTE_V){
     return 1;
   }
+  return 0;
+}
+
+void add_frame(struct proc *p, uint64 va, uint64 pa)
+{
+  acquire(&frame_lock);
+
+  for(int i = 0; i < MAX_FRAMES; i++){
+    if(frame_table[i].used == 0){
+      frame_table[i].used = 1;
+      frame_table[i].p = p;
+      frame_table[i].va = va;
+      frame_table[i].pa = pa;
+      frame_table[i].refbit = 1;
+      release(&frame_lock);
+      return;
+    }
+  }
+
+  release(&frame_lock);
+  if(evict_page()){
+    return add_frame(p, va, pa);
+  }
+  panic("no free frame slot");
+}
+struct frame* select_victim()
+{
+  // PASS 1: prefer low priority + refbit = 0
+  for(int i = 0; i < MAX_FRAMES; i++){
+    struct frame *f = &frame_table[clock_hand];
+    if(f->used && f->p == 0){
+        printf("PANIC: frame_table entry used but p==0\n");
+    }
+    if(f->used){
+      if(f->refbit == 0 && f->p && f->p->qlevel > 1){
+        clock_hand = (clock_hand + 1) % MAX_FRAMES;
+        return f;
+      }
+    }
+
+    clock_hand = (clock_hand + 1) % MAX_FRAMES;
+  }
+
+  // PASS 2: normal clock
+  for(int i = 0; i < MAX_FRAMES * 2; i++){
+    struct frame *f = &frame_table[clock_hand];
+
+    if(f->used){
+      if(f->refbit == 0){
+        clock_hand = (clock_hand + 1) % MAX_FRAMES;
+        return f;
+      } else {
+        f->refbit = 0;
+      }
+    }
+
+    clock_hand = (clock_hand + 1) % MAX_FRAMES;
+  }
+  return 0;
+}
+
+int evict_page()
+{
+  acquire(&frame_lock);
+
+  struct frame *f = select_victim();
+  if(f == 0){
+    release(&frame_lock);
+    return 0;
+  }
+
+  struct proc *p = f->p;
+  uint64 va = f->va;
+  uint64 pa = f->pa;
+
+  p->vmstats.pages_evicted++;
+  p->vmstats.resident_pages--;
+
+  pte_t *pte = walk(p->pagetable, va, 0);
+  if(pte == 0 || (*pte & PTE_V) == 0){
+    release(&frame_lock);
+    return 0;
+  }
+
+  
+  swap_out(p, va, (void*)pa);
+  *pte = (*pte & ~PTE_V) | PTE_S;
+  sfence_vma();
+  p->vmstats.pages_swapped_out++;
+
+
+
+  f->used = 0;
+  f->p = 0;
+  f->va = 0;
+  f->pa = 0;
+  f->refbit = 0;
+  release(&frame_lock);
+
+  kfree((void*)pa);
+
+  return 1;
+}
+
+uint64 swap_in(struct proc *p, uint64 va)
+{
+  int vpn = va / PGSIZE;
+
+  if(!p->swapped[vpn])
+    return 0;
+
+  int idx = p->swap_index[vpn];
+  if(idx < 0 || idx >= MAX_SWAP)
+    panic("invalid swap index");
+  char *mem = kalloc();
+  if(mem == 0)
+    return 0;
+
+  memmove(mem, swap_space[idx], PGSIZE);
+
+  acquire(&swap_lock);
+  swap_used[idx] = 0;
+  release(&swap_lock);
+
+  p->swapped[vpn] = 0;
+
+  if(mappages(p->pagetable, va, PGSIZE, (uint64)mem,
+      PTE_W|PTE_U|PTE_R) != 0){
+    kfree(mem);
+    return 0;
+  }
+  sfence_vma();
+
+  add_frame(p, va, (uint64)mem);
+
+  
+  acquire(&p->lock);
+  p->vmstats.pages_swapped_in++;    // page read from swap
+  p->vmstats.resident_pages++;      // page now resident
+  release(&p->lock);
+
+  return (uint64)mem;
+}
+
+int swap_out(struct proc *p, uint64 va, void *pa)
+{
+  acquire(&swap_lock);
+
+  int idx = -1;
+  for(int i = 0; i < MAX_SWAP; i++){
+    if(!swap_used[i]){
+      idx = i;
+      swap_used[i] = 1;
+      break;
+    }
+  }
+  
+  release(&swap_lock);
+  
+  if(idx == -1)
+    panic("swap full");
+  
+  memmove(swap_space[idx], pa, PGSIZE);
+
+  int vpn = va / PGSIZE;
+  p->swapped[vpn] = 1;
+  p->swap_index[vpn] = idx;
+
   return 0;
 }

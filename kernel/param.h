@@ -13,3 +13,6 @@
 #define MAXPATH      128   // maximum file path name
 #define USERSTACK    1     // user stack pages
 
+#define MAX_FRAMES 128   // adjust if needed
+#define MAX_PSYC_PAGES 64   // adjust if needed
+#define MAX_SWAP 256
