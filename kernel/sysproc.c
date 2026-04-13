@@ -15,7 +15,20 @@ sys_exit(void)
   kexit(n);
   return 0; // not reached
 }
-
+uint64
+sys_getvmstats(void)
+{
+  int pid;
+  uint64 addr;
+  argint(0, &pid);
+  argaddr(1, &addr);
+  struct vmstats info;
+  if (kgetvmstats(pid, &info) < 0)
+    return -1;
+  if (copyout(myproc()->pagetable, addr, (char *)&info, sizeof(info)) < 0)
+    return -1;
+  return 0;
+}
 uint64
 sys_getpid(void)
 {
@@ -106,7 +119,8 @@ sys_sbrk(void)
   argint(1, &t);
   addr = myproc()->sz;
 
-  if (t == SBRK_EAGER || n < 0)
+  // if (t == SBRK_EAGER || n < 0)
+  if(n<0)
   {
     if (growproc(n) < 0)
     {

@@ -48,3 +48,4 @@ entry("getsyscount");
 entry("childsyscount");
 entry("getlevel");
 entry("getmlfqinfo");
+entry("getvmstats");

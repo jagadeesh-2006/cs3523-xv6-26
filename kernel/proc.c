@@ -6,6 +6,9 @@
 #include "proc.h"
 #include "defs.h"
 
+extern void free_proc_swap_space(struct proc *p);
+extern void free_proc_frames(struct proc *p);
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -136,6 +139,20 @@ found:
   p->times_scheduled = 0;
   p->last_syscalls = 0;
 
+  p->vmstats.page_faults = 0;
+  p->vmstats.pages_evicted = 0;
+  p->vmstats.pages_swapped_in = 0;
+  p->vmstats.pages_swapped_out = 0;
+  p->vmstats.resident_pages = 0;
+
+  for (int i = 0; i < MAX_PSYC_PAGES; i++)
+  {
+    p->swapped[i] = 0;
+    p->swap_index[i] = -1;
+    p->pagelist[i] = 0;
+  }
+  p->num_pages = 0;
+
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
   {
@@ -171,8 +188,10 @@ freeproc(struct proc *p)
   if (p->trapframe)
     kfree((void *)p->trapframe);
   p->trapframe = 0;
+  free_proc_swap_space(p);   // fre
   if (p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  free_proc_frames(p);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -295,7 +314,7 @@ int kfork(void)
   }
 
   // Copy user memory from parent to child.
-  if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0)
+  if (uvmcopy(p->pagetable, np->pagetable, p->sz, np) < 0)
   {
     freeproc(np);
     release(&np->lock);
@@ -365,6 +384,28 @@ int kchildsyscount(int pid)
   release(&wait_lock);
 
   return count;
+}
+int
+kgetvmstats(int pid, struct vmstats *info)
+{
+  int found = -1;
+  for (struct proc *p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->pid == pid)
+    {
+      info->page_faults = p->vmstats.page_faults;
+      info->pages_evicted = p->vmstats.pages_evicted;
+      info->pages_swapped_in = p->vmstats.pages_swapped_in;
+      info->pages_swapped_out = p->vmstats.pages_swapped_out;
+      info->resident_pages = p->vmstats.resident_pages;
+      found = 0;
+      release(&p->lock);
+      break;
+    }
+    release(&p->lock);
+  }
+  return found;
 }
 
 // kernel helper for getmlfqinfo syscall
@@ -615,9 +656,7 @@ void scheduler(void)
       // now run process
       p->state = RUNNING;
       p->times_scheduled++;
-      
-      if (p->ticks_in_level == 0)
-      p->last_syscalls = p->syscallcount;
+      if (p->ticks_in_level == 0) p->last_syscalls = p->syscallcount;
       c->proc = p;
       swtch(&c->context, &p->context);
       // printf("PID %d level %d ticks %d\n", p->pid, p->qlevel, p->ticks_in_level);
@@ -635,7 +674,6 @@ void scheduler(void)
         p->ticks_in_level = 0;
         p->last_syscalls = p->syscallcount;
       }
-      
       release(&p->lock);
       found = 1;
     }

@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+
+int evict_page(void);
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -65,6 +67,21 @@ kfree(void *pa)
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
+// void *
+// kalloc(void)
+// {
+//   struct run *r;
+
+//   acquire(&kmem.lock);
+//   r = kmem.freelist;
+//   if(r)
+//     kmem.freelist = r->next;
+//   release(&kmem.lock);
+
+//   if(r)
+//     memset((char*)r, 5, PGSIZE); // fill with junk
+//   return (void*)r;
+// }
 void *
 kalloc(void)
 {
@@ -76,7 +93,18 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
-    memset((char*)r, 5, PGSIZE); // fill with junk
+  // handle memory exhaustion
+  if(r == 0){
+    if(evict_page() == 0)
+      return 0;
+
+    acquire(&kmem.lock);
+    r = kmem.freelist;
+    if(r)
+      kmem.freelist = r->next;
+    release(&kmem.lock);
+  }
+
+  memset((char*)r, 5, PGSIZE);
   return (void*)r;
 }

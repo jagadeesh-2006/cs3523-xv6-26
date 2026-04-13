@@ -5,6 +5,7 @@ struct inode;
 struct pipe;
 struct proc;
 struct mlfqinfo; // for getmlfqinfo syscall
+struct vmstats;  // for getvmstats syscall
 struct spinlock;
 struct sleeplock;
 struct stat;
@@ -86,8 +87,10 @@ int kgetppid(struct proc *);
 int kgetnumchild(void);
 int kchildsyscount(int);
 int kgetmlfqinfo(int, struct mlfqinfo *);
+int kgetvmstats(int, struct vmstats *);
 
-int growproc(int);
+    int
+    growproc(int);
 void proc_mapstacks(pagetable_t);
 pagetable_t proc_pagetable(struct proc *);
 void proc_freepagetable(pagetable_t, uint64);
@@ -164,7 +167,7 @@ int mappages(pagetable_t, uint64, uint64, uint64, int);
 pagetable_t uvmcreate(void);
 uint64 uvmalloc(pagetable_t, uint64, uint64, int);
 uint64 uvmdealloc(pagetable_t, uint64, uint64);
-int uvmcopy(pagetable_t, pagetable_t, uint64);
+int uvmcopy(pagetable_t, pagetable_t, uint64 ,struct proc *);
 void uvmfree(pagetable_t, uint64);
 void uvmunmap(pagetable_t, uint64, uint64, int);
 void uvmclear(pagetable_t, uint64);
