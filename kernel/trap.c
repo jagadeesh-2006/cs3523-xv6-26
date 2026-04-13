@@ -72,10 +72,10 @@ usertrap(void)
   {
     // ok
   }
-  else if ((r_scause() == 15 || r_scause() == 13) &&
-           vmfault(p->pagetable, r_stval(), (r_scause() == 13) ? 1 : 0) != 0)
+  else if (((r_scause() == 15 || r_scause() == 13 || r_scause() == 12)) &&
+           vmfault(p->pagetable, r_stval(), (r_scause() == 15) ? 0 : 1) != 0)
   {
-    // page fault on lazily-allocated page
+    // page fault on lazily-allocated page (load=13, store=15, instruction=12)
   }
   else
   {

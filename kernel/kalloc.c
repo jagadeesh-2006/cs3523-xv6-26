@@ -93,7 +93,7 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  // 🔥 NEW: handle memory exhaustion
+  // handle memory exhaustion
   if(r == 0){
     if(evict_page() == 0)
       return 0;

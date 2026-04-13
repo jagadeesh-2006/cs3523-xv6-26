@@ -27,6 +27,7 @@ struct frame
 struct frame frame_table[MAX_FRAMES];
 int clock_hand = 0;
 struct spinlock frame_lock;
+int stale_frame_cleanup_count = 0;
 
 // swap space
 char swap_space[MAX_SWAP][PGSIZE];
@@ -280,6 +281,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
+    // add_frame(myproc(), a, (uint64)mem);
   }
   return newsz;
 }
@@ -341,7 +343,7 @@ void uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
-int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz, struct proc *np)
 {
   pte_t *pte;
   uint64 pa, i;
@@ -364,7 +366,7 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       kfree(mem);
       goto err;
     }
-    add_frame(myproc(), i, (uint64)mem); // track the new frame with refbit=1
+    // add_frame(np, i, (uint64)mem); // track the new frame with refbit=1
   }
   return 0;
 
@@ -514,25 +516,30 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
 {
   struct proc *p = myproc();
 
-  if (va >= p->sz)
+  if (p == 0)    // no process, can't handle page fault
     return 0;
+
+  if (va >= p->sz)   // invalid access, va is outside process's memory
+    return 0; 
 
   va = PGROUNDDOWN(va);
 
-  if (ismapped(pagetable, va))
+  if (ismapped(pagetable, va))   // already mapped, shouldn't be faulting on this
     return walkaddr(pagetable, va);
 
   p->vmstats.page_faults++;
 
   int vpn = va / PGSIZE;
+  if (vpn >= MAX_PSYC_PAGES)   // invalid access, exceeds max process pages
+    return 0;
 
-  // CASE 1: swapped page
+  // swapped page
   if (p->swapped[vpn])
   {
     return swap_in(p, va);
   }
 
-  // CASE 2: new page
+  // new page
   char *mem = kalloc();
   if (mem == 0)
     return 0;
@@ -548,12 +555,12 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
 
   add_frame(p, va, (uint64)mem);
 
-  p->vmstats.resident_pages++;
+  // p->vmstats.resident_pages++;
 
   return (uint64)mem;
 }
 
-int ismapped(pagetable_t pagetable, uint64 va)
+int ismapped(pagetable_t pagetable, uint64 va) // returns 1 if va is mapped in pagetable, 0 otherwise
 {
   pte_t *pte = walk(pagetable, va, 0);
   if (pte == 0)
@@ -567,32 +574,40 @@ int ismapped(pagetable_t pagetable, uint64 va)
   return 0;
 }
 
-void add_frame(struct proc *p, uint64 va, uint64 pa)
+void add_frame(struct proc *p, uint64 va, uint64 pa)   // add a frame to the frame table, evicting if necessary. loops until successful.
 {
-  acquire(&frame_lock);
-
-  for (int i = 0; i < MAX_FRAMES; i++)
+  // printf("add_frame: pid=%d va=0x%lx\n", p ? p->pid : -1, va);
+  while (1)
   {
-    if (frame_table[i].used == 0)
+    acquire(&frame_lock);
+
+    for (int i = 0; i < MAX_FRAMES; i++)
     {
-      frame_table[i].used = 1;
-      frame_table[i].p = p;
-      frame_table[i].va = va;
-      frame_table[i].pa = pa;
-      frame_table[i].refbit = 1;
-      release(&frame_lock);
-      return;
+      if (frame_table[i].used == 0)
+      {
+        frame_table[i].used = 1;
+        frame_table[i].p = p;
+        frame_table[i].va = va;
+        frame_table[i].pa = pa;
+        frame_table[i].refbit = 1;
+        release(&frame_lock);
+        
+        p->vmstats.resident_pages++;   
+        
+        return;
+      }
+    }
+
+    release(&frame_lock);
+
+    // No free slot, try eviction
+    if (!evict_page())
+    {
+      panic("no free frame slot");
     }
   }
-
-  release(&frame_lock);
-  if (evict_page())
-  {
-    return add_frame(p, va, pa);
-  }
-  panic("no free frame slot");
 }
-struct frame *select_victim()
+struct frame *select_victim()  // select a victim frame to evict using the clock algorithm with MLFQ-aware preference
 {
   // PASS 1: prefer low priority + refbit = 0
   for (int i = 0; i < MAX_FRAMES; i++)
@@ -638,100 +653,116 @@ struct frame *select_victim()
   return 0;
 }
 
-int evict_page()
+int evict_page()  // evict a page using select_victim and return 1 if successful, 0 if no victim found (shouldn't happen since we only call evict_page when frame table is full)
 {
-  acquire(&frame_lock);
-
-  struct frame *f = select_victim();
-  if (f == 0)
+  while (1)
   {
-    printf("evict_page: no victim found\n");
-    release(&frame_lock);
-    return 0;
-  }
+    acquire(&frame_lock);
+    struct frame *f = select_victim();
 
-  struct proc *p = f->p;
-  uint64 va = f->va;
-  uint64 pa = f->pa;
+    if (f == 0)  
+    {
+      release(&frame_lock);
+      printf("evict_page: no victim found\n");
+      return 0;
+    }
 
-  pte_t *pte = walk(p->pagetable, va, 0); //
-  if (pte == 0 || (*pte & PTE_V) == 0)
-  {
-    printf("evict_page: invalid PTE for victim page, cleaning up stale frame entry\n");
-    // Stale frame entry - just mark it as free and try another victim
+    struct proc *p = f->p;
+    uint64 va = f->va;
+    uint64 pa = f->pa;
+
+    pte_t *pte = walk(p->pagetable, va, 0);
+    if (pte == 0 || (*pte & PTE_V) == 0)
+    {
+      stale_frame_cleanup_count++;
+      printf("evict_page: invalid PTE for victim page (va=0x%lx), cleaning up stale frame entry (count=%d)\n", va, stale_frame_cleanup_count);
+      f->used = 0;
+      f->p = 0;
+      f->va = 0;
+      f->pa = 0;
+      f->refbit = 0;
+      release(&frame_lock);
+      continue; // Try another victim
+    }
+
+    p->vmstats.pages_evicted++;
+    p->vmstats.resident_pages--;
+
+    swap_out(p, va, (void *)pa);
+    *pte = (*pte & ~PTE_V) | PTE_S;   // mark page as swapped (invalid but in swap)
+    sfence_vma();  
+    p->vmstats.pages_swapped_out++;
+
     f->used = 0;
     f->p = 0;
     f->va = 0;
     f->pa = 0;
     f->refbit = 0;
     release(&frame_lock);
-    kfree((void *)pa);
-    // Try to evict again
-    return evict_page();
+
+    kfree((void *)pa);   
+
+    return 1;
   }
-
-  p->vmstats.pages_evicted++;
-  p->vmstats.resident_pages--;
-
-  swap_out(p, va, (void *)pa);
-  *pte = (*pte & ~PTE_V) | PTE_S;
-  // sfence_vma();
-  p->vmstats.pages_swapped_out++;
-
-  f->used = 0;
-  f->p = 0;
-  f->va = 0;
-  f->pa = 0;
-  f->refbit = 0;
-  release(&frame_lock);
-
-  kfree((void *)pa);
-
-  return 1;
 }
 
 uint64 swap_in(struct proc *p, uint64 va)
 {
   int vpn = va / PGSIZE;
 
+  //check vpn whether exceed max process pages
+  if (vpn >= MAX_PSYC_PAGES)
+    return 0;
+
+  //check page swap or not
   if (!p->swapped[vpn])
     return 0;
 
   int idx = p->swap_index[vpn];
   if (idx < 0 || idx >= MAX_SWAP)
     panic("invalid swap index");
+
+  //make suer the page is not already mapped
+  pte_t *pte = walk(p->pagetable, va, 0);
+  if (pte == 0)
+    return 0;
+  int perm = PTE_FLAGS(*pte) & ~(PTE_S | PTE_V);
+  *pte =0;
   char *mem = kalloc();
   if (mem == 0)
     return 0;
-
+  // copy page from swap space to physical memory
   memmove(mem, swap_space[idx], PGSIZE);
 
   acquire(&swap_lock);
   swap_used[idx] = 0;
   release(&swap_lock);
 
-  p->swapped[vpn] = 0;
-
+  // update page table to point to new physical memory and mark it valid
   if (mappages(p->pagetable, va, PGSIZE, (uint64)mem,
-               PTE_W | PTE_U | PTE_R) != 0)
+               perm | PTE_V) != 0)
   {
     kfree(mem);
     return 0;
   }
+
+  p->swapped[vpn] = 0;
+  p->swap_index[vpn] = -1;
   sfence_vma();
 
   add_frame(p, va, (uint64)mem);
 
   acquire(&p->lock);
   p->vmstats.pages_swapped_in++; // page read from swap
-  p->vmstats.resident_pages++;   // page now resident
+  // p->vmstats.resident_pages++;   // page now resident
   release(&p->lock);
 
-  return (uint64)mem;
+  return (uint64)mem; 
 }
 
 int swap_out(struct proc *p, uint64 va, void *pa)
 {
+  // find a free slot in swap spaceand copy the page there
   acquire(&swap_lock);
 
   int idx = -1;
@@ -753,18 +784,59 @@ int swap_out(struct proc *p, uint64 va, void *pa)
   memmove(swap_space[idx], pa, PGSIZE);
 
   int vpn = va / PGSIZE;
+  if (vpn >= MAX_PSYC_PAGES)  // 
+    return -1;
   p->swapped[vpn] = 1;
   p->swap_index[vpn] = idx;
 
   return 0;
 }
-// Set refbit = 1 for a frame given physical address
-void set_refbit(uint64 pa)
+
+void free_proc_swap_space(struct proc *p)
+{
+  // free any swap slots used by this process
+  acquire(&swap_lock);
+  for (int i = 0; i < MAX_PSYC_PAGES; i++)
+  {
+    if (p->swapped[i])
+    {
+      int idx = p->swap_index[i];
+      if (idx >= 0 && idx < MAX_SWAP)
+        swap_used[idx] = 0;
+      p->swapped[i] = 0;
+      p->swap_index[i] = -1;
+    }
+  }
+  release(&swap_lock);
+}
+
+void free_proc_frames(struct proc *p)
 {
   acquire(&frame_lock);
   for (int i = 0; i < MAX_FRAMES; i++)
   {
-    if (frame_table[i].used && frame_table[i].pa == pa)
+    if (frame_table[i].used && frame_table[i].p == p)
+    {
+      frame_table[i].used = 0;
+      frame_table[i].p = 0;
+      frame_table[i].pa = 0;
+      frame_table[i].va = 0;
+      frame_table[i].refbit = 0;
+      // Note: physical page is already freed in proc_freepagetable
+    }
+  }
+  release(&frame_lock);
+}
+void set_refbit(uint64 pa)
+{
+  // pa is a physical address from the page table entry.
+  // Convert to kernel virtual address to match frame_table.pa values.
+  uint64 kva = pa + KERNBASE;
+
+  acquire(&frame_lock);
+  for (int i = 0; i < MAX_FRAMES; i++)
+  {
+    if (frame_table[i].used && frame_table[i].pa == kva)
     {
       frame_table[i].refbit = 1;
       break;

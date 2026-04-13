@@ -31,7 +31,7 @@ int main()
 
     printf("Accessed second half of pages (%d pages)\n", pages / 2);
 
-    // 4. Retrieve stats: Use the system call you implemented.
+    // 4. Retrieve stats: Use the system call ymakou implemented.
     if ((getvmstats(getpid(), &stats) ) < 0) {
         printf("Error: getvmstats failed\n");
         exit(1);

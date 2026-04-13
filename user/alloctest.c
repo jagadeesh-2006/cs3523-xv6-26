@@ -10,9 +10,28 @@ int main() {
     int i;
 
     printf("Starting Page Replacement Test...\n");
-
+    int pid1 = 1;
+    if (getvmstats(pid1, &stats) < 0) {
+        printf("Error: getvmstats system call failed\n");
+        exit(1);
+    }
+    printf("\n--- Test Results ---\n");
+    printf("Total Pages Requested: %d\n", pages);
+    printf("Page Faults:           %d\n", stats.page_faults);
+    printf("Pages Evicted:         %d\n", stats.pages_evicted);
+    printf("Pages Swapped Out:     %d\n", stats.pages_swapped_out);
+    int pid2 = 2;
+    if (getvmstats(pid2, &stats) < 0) {
+        printf("Error: getvmstats system call failed\n");
+        exit(1);
+    }
+    printf("\n--- Test Results ---\n");
+    printf("Total Pages Requested: %d\n", pages);
+    printf("Page Faults:           %d\n", stats.page_faults);
+    printf("Pages Evicted:         %d\n", stats.pages_evicted);
+    printf("Pages Swapped Out:     %d\n", stats.pages_swapped_out);
     // 2. Allocate memory
-    char *p = sbrk(pages * 4096);
+    char *p = sbrklazy(pages * 4096);
     if (p == (char*)-1) {
         printf("sbrk failed\n");
         exit(1);
