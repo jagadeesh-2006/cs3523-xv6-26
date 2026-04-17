@@ -152,6 +152,11 @@ UPROGS=\
 	$U/_prioritytest\
 	$U/_reusetest\
 	$U/_evicttest\
+	$U/_test1\
+	$U/_test2\
+	$U/_test3\
+	$U/_test4\
+	$U/_test5\
 
 
 fs.img: mkfs/mkfs README $(UPROGS)

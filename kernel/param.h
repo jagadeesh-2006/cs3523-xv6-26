@@ -14,5 +14,5 @@
 #define USERSTACK 1                 // user stack pages
 
 #define MAX_FRAMES 128     // adjust if needed
-#define MAX_PSYC_PAGES 256 // adjust if needed
-#define MAX_SWAP 256
+#define MAX_PSYC_PAGES 512 // adjust if needed
+#define MAX_SWAP 256   

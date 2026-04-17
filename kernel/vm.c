@@ -354,6 +354,13 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz, struct proc *np)
   {
     if ((pte = walk(old, i, 0)) == 0)
       continue; // page table entry hasn't been allocated
+      
+    if (!(*pte & PTE_V) && (*pte & PTE_S)) {
+        //Force the page into memory so we can copy it normally
+        if (vmfault(old, i, 0) == 0) return -1;
+        // Re-fetch pte after faulting it in
+        pte = walk(old, i, 0);
+    }
     if ((*pte & PTE_V) == 0)
       continue; // physical page hasn't been allocated
     pa = PTE2PA(*pte);
@@ -366,7 +373,7 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz, struct proc *np)
       kfree(mem);
       goto err;
     }
-    // add_frame(np, i, (uint64)mem); // track the new frame with refbit=1
+    add_frame(np, i, (uint64)mem); // track the new frame with refbit=1
   }
   return 0;
 
@@ -607,50 +614,39 @@ void add_frame(struct proc *p, uint64 va, uint64 pa)   // add a frame to the fra
     }
   }
 }
-struct frame *select_victim()  // select a victim frame to evict using the clock algorithm with MLFQ-aware preference
-{
-  // PASS 1: prefer low priority + refbit = 0
-  for (int i = 0; i < MAX_FRAMES; i++)
-  {
-    struct frame *f = &frame_table[clock_hand];
-    if (f->used && f->p == 0)
-    {
-      printf("PANIC: frame_table entry used but p==0\n");
+struct frame *select_victim() {
+    //Priority-Based Clock
+    for (int level = 3; level >= 1; level--) { 
+        for (int i = 0; i < MAX_FRAMES; i++) {
+            int idx = (clock_hand + i) % MAX_FRAMES;
+            struct frame *f = &frame_table[idx];
+            
+            // Priority check: Is this page low priority and not recently used?
+            if (f->used && f->p && f->p->qlevel == level && f->refbit == 0) {
+                clock_hand = (idx + 1) % MAX_FRAMES;
+                return f;
+            }
+        }
     }
-    if (f->used)
-    {
-      if (f->refbit == 0 && f->p && f->p->qlevel > 1)
-      {
+    //Standard Clock
+    for (int i = 0; i < MAX_FRAMES * 2; i++) {
+        struct frame *f = &frame_table[clock_hand];
+        
+        if (f->used && f->p) {
+            if (f->refbit == 0) {
+                // Victim found
+                struct frame *victim = f;
+                clock_hand = (clock_hand + 1) % MAX_FRAMES;
+                return victim;
+            } else {
+                // Give second chance: Clear refbit
+                f->refbit = 0;
+            }
+        }
         clock_hand = (clock_hand + 1) % MAX_FRAMES;
-        return f;
-      }
     }
 
-    clock_hand = (clock_hand + 1) % MAX_FRAMES;
-  }
-
-  // PASS 2: normal clock
-  for (int i = 0; i < MAX_FRAMES * 2; i++)
-  {
-    struct frame *f = &frame_table[clock_hand];
-
-    // if(f->used){
-    if (f->used && f->p)
-    {
-      if (f->refbit == 0)
-      {
-        clock_hand = (clock_hand + 1) % MAX_FRAMES;
-        return f;
-      }
-      else
-      {
-        f->refbit = 0;
-      }
-    }
-
-    clock_hand = (clock_hand + 1) % MAX_FRAMES;
-  }
-  return 0;
+    return 0; // Failure - should only happen if no frames are 'used'
 }
 
 int evict_page()  // evict a page using select_victim and return 1 if successful, 0 if no victim found (shouldn't happen since we only call evict_page when frame table is full)
