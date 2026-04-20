@@ -128,7 +128,18 @@ struct proc {
   // virtual page tracking
   uint64 pagelist[MAX_PSYC_PAGES]; // virtual addresses of pages
   int num_pages;
+
+  // disk I/O statistics
+  uint64 disk_reads;
+  uint64 disk_writes;
+  uint64 total_disk_latency; 
 };
+
+// struct disc_stats {
+//   uint64 reads;
+//   uint64 writes;
+//   uint64 total_latency; // in microseconds
+// };
 
 // structure returned by getmlfqinfo syscall
 struct mlfqinfo {

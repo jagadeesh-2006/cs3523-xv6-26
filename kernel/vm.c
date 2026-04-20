@@ -7,6 +7,8 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "fs.h"
+#include "sleeplock.h"
+#include "buf.h"
 
 uint64 swap_in(struct proc *p, uint64 va);
 int swap_out(struct proc *p, uint64 va, void *pa);
@@ -248,6 +250,7 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if (do_free)
     {
       uint64 pa = PTE2PA(*pte);
+      remove_frame_by_pa(pa);
       kfree((void *)pa);
     }
     *pte = 0;
@@ -684,34 +687,36 @@ int evict_page()  // evict a page using select_victim and return 1 if successful
     p->vmstats.pages_evicted++;
     p->vmstats.resident_pages--;
 
-    swap_out(p, va, (void *)pa);
     *pte = (*pte & ~PTE_V) | PTE_S;   // mark page as swapped (invalid but in swap)
     sfence_vma();  
-    p->vmstats.pages_swapped_out++;
-
     f->used = 0;
     f->p = 0;
     f->va = 0;
     f->pa = 0;
     f->refbit = 0;
     release(&frame_lock);
+    swap_out(p, va, (void *)pa);
+    p->vmstats.pages_swapped_out++;
+
 
     kfree((void *)pa);   
 
     return 1;
   }
-}
 
+}
+//   1. Each swap slot spans BLKS_PER_PAGE (4) disk blocks starting at
+//      SWAP_START + slot * BLKS_PER_PAGE.  (PA3 used one in-memory slot.)
+//   2. Reads go through virtio_disk_rw_swap (scheduler + RAID) not the
+//      in-memory array.
+//   3. We copy BSIZE bytes per block (not PGSIZE in one shot) to stay
+//      within the buf->data[BSIZE] boundary.
 uint64 swap_in(struct proc *p, uint64 va)
-{
+{ 
   int vpn = va / PGSIZE;
 
-  //check vpn whether exceed max process pages
-  if (vpn >= MAX_PSYC_PAGES)
-    return 0;
-
-  //check page swap or not
-  if (!p->swapped[vpn])
+  //check vpn whether exceed max process pages and swap or not
+  if (vpn >= MAX_PSYC_PAGES || !p->swapped[vpn])
     return 0;
 
   int idx = p->swap_index[vpn];
@@ -728,8 +733,20 @@ uint64 swap_in(struct proc *p, uint64 va)
   if (mem == 0)
     return 0;
   // copy page from swap space to physical memory
-  memmove(mem, swap_space[idx], PGSIZE);
+  // memmove(mem, swap_space[idx], PGSIZE);
 
+  // Read BLKS_PER_PAGE blocks (each BSIZE bytes) from disk via RAID.
+  for (int i = 0; i < BLKS_PER_PAGE; i++) {
+    uint blockno = SWAP_START + (uint)idx * BLKS_PER_PAGE + i;
+ 
+    // bread gets us a buffer; the initial FS-path read is harmless —
+    // virtio_disk_rw_swap immediately overwrites b->data with the RAID data.
+    struct buf *b = bread(ROOTDEV, blockno);
+    virtio_disk_rw_swap(b, 0);                    // re-read from RAID location
+    memmove(mem + i * BSIZE, b->data, BSIZE);     // copy one block at a time
+    brelse(b);
+  }
+ 
   acquire(&swap_lock);
   swap_used[idx] = 0;
   release(&swap_lock);
@@ -756,6 +773,10 @@ uint64 swap_in(struct proc *p, uint64 va)
   return (uint64)mem; 
 }
 
+// 1. Each swap slot spans BLKS_PER_PAGE (4) disk blocks starting at
+//      SWAP_START + slot * BLKS_PER_PAGE.
+//   2. Writes go through virtio_disk_rw_swap (scheduler + RAID).
+//   3. We copy BSIZE bytes per block (not PGSIZE in one shot).
 int swap_out(struct proc *p, uint64 va, void *pa)
 {
   // find a free slot in swap spaceand copy the page there
@@ -777,7 +798,19 @@ int swap_out(struct proc *p, uint64 va, void *pa)
   if (idx == -1)
     panic("swap full");
 
-  memmove(swap_space[idx], pa, PGSIZE);
+  // memmove(swap_space[idx], pa, PGSIZE);
+  // Write BLKS_PER_PAGE blocks (each BSIZE bytes) to disk via RAID.
+  char *src = (char *)pa;
+  for (int i = 0; i < BLKS_PER_PAGE; i++) {
+    uint blockno = SWAP_START + (uint)idx * BLKS_PER_PAGE + i;
+ 
+    // bread gets us a buffer; we overwrite its data before writing,
+    // so the initial FS-path read is wasted but harmless.
+    struct buf *b = bread(ROOTDEV, blockno);
+    memmove(b->data, src + i * BSIZE, BSIZE);  // fill one block at a time
+    virtio_disk_rw_swap(b, 1);                 // write to RAID location
+    brelse(b);
+  }
 
   int vpn = va / PGSIZE;
   if (vpn >= MAX_PSYC_PAGES)  // 
@@ -835,6 +868,28 @@ void set_refbit(uint64 pa)
     if (frame_table[i].used && frame_table[i].pa == kva)
     {
       frame_table[i].refbit = 1;
+      break;
+    }
+  }
+  release(&frame_lock);
+}
+
+// Remove a frame table entry by physical address.
+// Called when a page is being freed so the frame table stays in sync.
+void
+remove_frame_by_pa(uint64 pa)
+{
+  acquire(&frame_lock);
+  for (int i = 0; i < MAX_FRAMES; i++) {
+    if (frame_table[i].used && frame_table[i].pa == pa) {
+      // decrement resident count on the owning process
+      if (frame_table[i].p)
+        frame_table[i].p->vmstats.resident_pages--;
+      frame_table[i].used   = 0;
+      frame_table[i].p      = 0;
+      frame_table[i].va     = 0;
+      frame_table[i].pa     = 0;
+      frame_table[i].refbit = 0;
       break;
     }
   }

@@ -119,6 +119,8 @@ $U/_forktest: $U/forktest.o $(ULIB)
 mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 	gcc -Wno-unknown-attributes -I. -o mkfs/mkfs mkfs/mkfs.c
 
+# dd if=/dev/zero bs=512 count=2048 >> fs.img
+
 # Prevent deletion of intermediate files, e.g. cat.o, after first build, so
 # that disk image changes after first build are persistent until clean.  More
 # details:
@@ -157,10 +159,16 @@ UPROGS=\
 	$U/_test3\
 	$U/_test4\
 	$U/_test5\
+	$U/_p41\
+	$U/_p43\
+	$U/_p44\
+	$U/_p45\
+# 	$U/_p42\
 
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
+	dd if=/dev/zero bs=512 count=2048 >> fs.img
 
 -include kernel/*.d user/*.d
 

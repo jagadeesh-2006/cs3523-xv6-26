@@ -16,3 +16,6 @@
 #define MAX_FRAMES 128     // adjust if needed
 #define MAX_PSYC_PAGES 512 // adjust if needed
 #define MAX_SWAP 256   
+
+#define SWAP_START    FSSIZE           // first block beyond the FS area (block 2000)
+#define BLKS_PER_PAGE (PGSIZE / BSIZE) // = 4096/1024 = 4 blocks per page

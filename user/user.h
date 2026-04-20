@@ -28,6 +28,7 @@ int getppid(void);      // getppid
 int getnumchild(void);  // no of active childs(not zombies)
 int getsyscount(void);  // returns syscall count for calling process
 int childsyscount(int); // returns syscall count for child of the caller having the pid
+int setdisksched(int); // sets the disk scheduling policy
 
 // structure used with getmlfqinfo syscall
 struct mlfqinfo

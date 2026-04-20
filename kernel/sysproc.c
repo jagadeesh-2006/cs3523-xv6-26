@@ -6,7 +6,8 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "vm.h"
-
+#include "virtio.h"
+extern int current_sched_policy;
 uint64
 sys_exit(void)
 {
@@ -27,6 +28,19 @@ sys_getvmstats(void)
     return -1;
   if (copyout(myproc()->pagetable, addr, (char *)&info, sizeof(info)) < 0)
     return -1;
+  return 0;
+}
+//System call to set disk scheduling policy 
+// policy = 0 → FCFS, policy = 1 → SSTF
+uint64
+sys_setdisksched(void)
+{
+  int policy;
+  argint(0, &policy);
+  if(policy != 0 && policy != 1)
+    return -1;
+ 
+  current_sched_policy = policy;   // writes directly to the global
   return 0;
 }
 uint64

@@ -178,6 +178,7 @@ int copyin(pagetable_t, char *, uint64, uint64);
 int copyinstr(pagetable_t, char *, uint64, uint64);
 int ismapped(pagetable_t, uint64);
 uint64 vmfault(pagetable_t, uint64, int);
+void remove_frame_by_pa(uint64);
 
 // plic.c
 void plicinit(void);
@@ -189,6 +190,12 @@ void plic_complete(int);
 void virtio_disk_init(void);
 void virtio_disk_rw(struct buf *, int);
 void virtio_disk_intr(void);
+void virtio_disk_issue(struct buf *, int, uint64);
+void raid_logic(struct buf *, int);
+void xor_pages(struct buf * , struct buf **, int);
+void virtio_disk_rw_swap(struct buf *, int);
+int sched_pick_target(void);
+
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x) / sizeof((x)[0]))

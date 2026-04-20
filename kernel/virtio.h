@@ -48,6 +48,7 @@
 // this many virtio descriptors.
 // must be a power of two.
 #define NUM 8
+#define NUM_DISKS 4 
 
 // a single descriptor, from the spec.
 struct virtq_desc {
@@ -94,3 +95,31 @@ struct virtio_blk_req {
   uint32 reserved;
   uint64 sector;
 };
+
+#define FCFS 0
+#define SSTF 1
+#define ROTATIONAL_DELAY 10  // Constant C for latency model
+ 
+// Structure to wrap disk requests for the scheduler queue.
+// 'p' is the process that initiated the request (for priority tie-breaking).
+struct disk_req {
+  struct buf  *b;
+  int          block_no;
+  int          priority;  // process qlevel from PA2
+  struct proc *p;         // owning process
+};
+ 
+#define MAX_DISK_REQ 64
+ 
+// ---------------------------------------------------------------------------
+// Global variable DECLARATIONS only — actual definitions are in virtio_disk.c.
+// Putting definitions in a header causes "multiple definition" linker errors
+// when more than one .c file includes this header.
+// ---------------------------------------------------------------------------
+extern int disk_fail_sim;        // which disk index to treat as failed (-1 = none)
+extern int current_raid_level;   // 0 = RAID0, 1 = RAID1, 5 = RAID5
+extern int current_sched_policy; // FCFS or SSTF
+extern int disk_head_pos;        // current simulated disk head position
+ 
+extern struct disk_req disk_queue[MAX_DISK_REQ];
+extern int queue_size;
