@@ -146,6 +146,9 @@ int kexec(char *path, char **argv)
   p->vmstats.pages_swapped_in = 0;
   p->vmstats.pages_swapped_out = 0;
   p->vmstats.resident_pages = 0;  // ← this is the key one
+  p->disk_reads = 0;
+  p->disk_writes = 0;
+  p->total_disk_latency = 0;
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 

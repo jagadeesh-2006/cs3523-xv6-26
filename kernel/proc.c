@@ -145,6 +145,10 @@ found:
   p->vmstats.pages_swapped_out = 0;
   p->vmstats.resident_pages = 0;
 
+  p->disk_reads = 0;
+  p->disk_writes = 0;
+  p->total_disk_latency = 0;
+
   for (int i = 0; i < MAX_PSYC_PAGES; i++)
   {
     p->swapped[i] = 0;
@@ -210,6 +214,9 @@ freeproc(struct proc *p)
   p->last_syscalls = 0;
   p->times_scheduled = 0;
   p->last_syscalls = 0;
+  p->disk_reads = 0;
+  p->disk_writes = 0;
+  p->total_disk_latency = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -385,8 +392,7 @@ int kchildsyscount(int pid)
 
   return count;
 }
-int
-kgetvmstats(int pid, struct vmstats *info)
+int kgetvmstats(int pid, struct vmstats *info)
 {
   int found = -1;
   for (struct proc *p = proc; p < &proc[NPROC]; p++)
@@ -399,6 +405,10 @@ kgetvmstats(int pid, struct vmstats *info)
       info->pages_swapped_in = p->vmstats.pages_swapped_in;
       info->pages_swapped_out = p->vmstats.pages_swapped_out;
       info->resident_pages = p->vmstats.resident_pages;
+
+      info->disk.reads = p->disk_reads;
+      info->disk.writes = p->disk_writes;
+      info->disk.total_latency = p->total_disk_latency;
       found = 0;
       release(&p->lock);
       break;

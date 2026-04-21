@@ -49,3 +49,4 @@ entry("childsyscount");
 entry("getlevel");
 entry("getmlfqinfo");
 entry("getvmstats");
+entry("setdisksched");

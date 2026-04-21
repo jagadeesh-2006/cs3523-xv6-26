@@ -42,12 +42,18 @@ struct mlfqinfo
 int getlevel(void);                      // returns current MLFQ level
 int getmlfqinfo(int, struct mlfqinfo *); // fills mlfqinfo for given pid
 
+struct disc_stats {
+    uint64 reads;
+    uint64 writes;
+    uint64 total_latency;
+};
 struct vmstats {
   int page_faults;
   int pages_evicted;
   int pages_swapped_in;
   int pages_swapped_out;
   int resident_pages;
+  struct disc_stats disk;
 };
 
 int getvmstats(int pid, struct vmstats *);

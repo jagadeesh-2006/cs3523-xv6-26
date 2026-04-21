@@ -163,12 +163,12 @@ UPROGS=\
 	$U/_p43\
 	$U/_p44\
 	$U/_p45\
-# 	$U/_p42\
+	$U/_p42\
 
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
-	dd if=/dev/zero bs=512 count=2048 >> fs.img
+	dd if=/dev/zero bs=512 count=20480 >> fs.img
 
 -include kernel/*.d user/*.d
 

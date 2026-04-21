@@ -742,7 +742,7 @@ uint64 swap_in(struct proc *p, uint64 va)
     // bread gets us a buffer; the initial FS-path read is harmless —
     // virtio_disk_rw_swap immediately overwrites b->data with the RAID data.
     struct buf *b = bread(ROOTDEV, blockno);
-    virtio_disk_rw_swap(b, 0);                    // re-read from RAID location
+    // virtio_disk_rw_swap(b, 0);                    // re-read from RAID location
     memmove(mem + i * BSIZE, b->data, BSIZE);     // copy one block at a time
     brelse(b);
   }
@@ -808,7 +808,8 @@ int swap_out(struct proc *p, uint64 va, void *pa)
     // so the initial FS-path read is wasted but harmless.
     struct buf *b = bread(ROOTDEV, blockno);
     memmove(b->data, src + i * BSIZE, BSIZE);  // fill one block at a time
-    virtio_disk_rw_swap(b, 1);                 // write to RAID location
+    // virtio_disk_rw_swap(b, 1);                 // write to RAID location
+    bwrite(b);                               // write to disk (no RAID)
     brelse(b);
   }
 

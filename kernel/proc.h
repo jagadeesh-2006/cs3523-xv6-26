@@ -1,3 +1,5 @@
+#include "vm.h"
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -80,6 +82,11 @@ struct trapframe {
 };
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+struct disc_stats {
+    uint64 reads;
+    uint64 writes;
+    uint64 total_latency;
+};
 
 struct vmstats {
   int page_faults;
@@ -87,6 +94,7 @@ struct vmstats {
   int pages_swapped_in;
   int pages_swapped_out;
   int resident_pages;
+  struct disc_stats disk;
 };
 // Per-process state
 struct proc {
@@ -94,11 +102,11 @@ struct proc {
 
   // p->lock must be held when using these:
   enum procstate state;        // Process state
-  void *chan;                  // If non-zero, sleeping on chan
-  int killed;                  // If non-zero, have been killed
-  int xstate;                  // Exit status to be returned to parent's wait
-  int pid;                     // Process ID
-  int syscallcount;           // number of syscalls invoked since creation
+  void *chan;           // If non-zero, sleeping on chan
+  int killed;           // If non-zero, have been killed
+  int xstate;           // Exit status to be returned to parent's wait
+  int pid;              // Process ID
+   int syscallcount;     // number of syscalls invoked since creation
 
   // scheduling (MLFQ) fields
   int qlevel;                  // current MLFQ queue level (0-3)
@@ -134,12 +142,6 @@ struct proc {
   uint64 disk_writes;
   uint64 total_disk_latency; 
 };
-
-// struct disc_stats {
-//   uint64 reads;
-//   uint64 writes;
-//   uint64 total_latency; // in microseconds
-// };
 
 // structure returned by getmlfqinfo syscall
 struct mlfqinfo {
