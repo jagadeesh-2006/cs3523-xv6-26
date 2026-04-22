@@ -118,7 +118,7 @@ sys_sbrk(void)
   argint(0, &n);
   argint(1, &t);
   addr = myproc()->sz;
-
+  // printf("sys_sbrk: n=%d, t=%d, current sz=%p\n", n, t, addr);
   // if (t == SBRK_EAGER || n < 0)
   if(n<0)
   {

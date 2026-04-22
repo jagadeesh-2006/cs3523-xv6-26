@@ -145,9 +145,9 @@ UPROGS=\
 	$U/_forphan\
 	$U/_dorphan\
 	$U/_getsyscount\
-	$U/_sched_test1\
-	$U/_sched_test2\
-	$U/_sched_test3\
+	$U/_pa2_1\
+	$U/_pa2_2\
+	$U/_pa2_3\
 	$U/_alloctest\
 	$U/_prioritytest\
 	$U/_reusetest\
@@ -157,6 +157,10 @@ UPROGS=\
 	$U/_test3\
 	$U/_test4\
 	$U/_test5\
+	$U/_pa3_1\
+	$U/_pa3_2\
+	$U/_pa3_3\
+	
 
 
 fs.img: mkfs/mkfs README $(UPROGS)

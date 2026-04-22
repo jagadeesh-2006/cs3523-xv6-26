@@ -248,6 +248,16 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if (do_free)
     {
       uint64 pa = PTE2PA(*pte);
+      for(int i=0; i<MAX_FRAMES; i++) {
+        if(frame_table[i].used && frame_table[i].pa == pa) {
+          frame_table[i].used = 0;
+          frame_table[i].p = 0;
+          frame_table[i].pa = 0;
+          frame_table[i].va = 0;
+          frame_table[i].refbit = 0;
+          break;
+        }
+      }
       kfree((void *)pa);
     }
     *pte = 0;
@@ -530,7 +540,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
     return 0; 
 
   va = PGROUNDDOWN(va);
-
+  // printf("vamfault: pid=%d va=0x%lx read=%d\n", p->pid, va, read);
   if (ismapped(pagetable, va))   // already mapped, shouldn't be faulting on this
     return walkaddr(pagetable, va);
 
@@ -771,6 +781,7 @@ int swap_out(struct proc *p, uint64 va, void *pa)
       break;
     }
   }
+  
 
   release(&swap_lock);
 
@@ -825,14 +836,10 @@ void free_proc_frames(struct proc *p)
 }
 void set_refbit(uint64 pa)
 {
-  // pa is a physical address from the page table entry.
-  // Convert to kernel virtual address to match frame_table.pa values.
-  uint64 kva = pa + KERNBASE;
-
   acquire(&frame_lock);
   for (int i = 0; i < MAX_FRAMES; i++)
   {
-    if (frame_table[i].used && frame_table[i].pa == kva)
+    if (frame_table[i].used && frame_table[i].pa == pa)
     {
       frame_table[i].refbit = 1;
       break;
